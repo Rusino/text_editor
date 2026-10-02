@@ -64,3 +64,19 @@ skia_source_set("tests") {
   ]
 }
 
+skia_executable("text_editor_tests") {
+  testonly = true
+  sources = [
+    "tests/TextEditorMain.cpp",
+    "tests/TextEditorTest.cpp",
+  ]
+  deps = [
+    ":text_editor",
+    "../..:flags",
+    "../..:skia",
+    "../..:test",
+    "../..:tool_utils",
+    "../../modules/skunicode",
+  ]
+}
+
