@@ -24,26 +24,26 @@ using namespace skia::text_editor;
 class TextEditorApp : public Application, public Window::Layer {
 public:
     TextEditorApp(int argc, char** argv, void* platformData)
-        : fBackendType(Window::kRaster_BackendType)
+        : fBackendType(Window::BackendType::kRaster)
         , fIsMouseDown(false)
         , fPadding(24.0f)
     {
         SkGraphics::Init();
 
-        fWindow = Window::CreateNativeWindow(platformData);
-        fWindow->setRequestedDisplayParams(skwindow::DisplayParams());
+        fWindow = Windows::CreateNativeWindow(platformData);
+        fWindow->setRequestedDisplayParams(std::make_unique<skwindow::DisplayParams>());
         fWindow->pushLayer(this);
 
 #if defined(SK_GL)
-        if (!fWindow->attach(Window::kNativeGL_BackendType)) {
-            fWindow->attach(Window::kRaster_BackendType);
-            fBackendType = Window::kRaster_BackendType;
+        if (!fWindow->attach(Window::BackendType::kNativeGL)) {
+            fWindow->attach(Window::BackendType::kRaster);
+            fBackendType = Window::BackendType::kRaster;
         } else {
-            fBackendType = Window::kNativeGL_BackendType;
+            fBackendType = Window::BackendType::kNativeGL;
         }
 #else
-        fWindow->attach(Window::kRaster_BackendType);
-        fBackendType = Window::kRaster_BackendType;
+        fWindow->attach(Window::BackendType::kRaster);
+        fBackendType = Window::BackendType::kRaster;
 #endif
 
         SkFont font = ToolUtils::DefaultFont();

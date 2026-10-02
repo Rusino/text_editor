@@ -36,6 +36,21 @@ skia_source_set("text_editor") {
   ]
 }
 
+skia_source_set("app") {
+  testonly = true
+  sources = [
+    "app/TextEditorApp.cpp",
+  ]
+  deps = [
+    ":text_editor",
+    "../..:sk_app",
+    "../..:skia",
+    "../..:tool_utils",
+    "../../modules/skunicode",
+    "../../tools/window:window",
+  ]
+}
+
 skia_source_set("tests") {
   testonly = true
   sources = [
@@ -48,3 +63,4 @@ skia_source_set("tests") {
     "../../modules/skunicode",
   ]
 }
+

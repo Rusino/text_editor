@@ -82,7 +82,7 @@ private:
 
             // 1. Initialize HarfBuzz buffer with strictly preserved 1-to-1 character cluster mapping
             hb_buffer_t* buf = hb_buffer_create();
-            hb_buffer_set_cluster_level(buf, HB_BUFFER_CLUSTER_LEVEL_CHARACTERS);
+            hb_buffer_set_cluster_level(buf, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
 
             static hb_unicode_funcs_t* sNoComposeFuncs = []() {
                 hb_unicode_funcs_t* ufuncs = hb_unicode_funcs_create(hb_unicode_funcs_get_default());

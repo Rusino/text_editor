@@ -59,7 +59,7 @@ void TextEditorPainter::Paint(
     });
 
     // 3. Draw Caret
-    if (options.show_caret && viewModel.isCaretVisible()) {
+    if (options.show_caret && viewModel.isCaretVisible() && viewModel.selection().is_collapsed()) {
         const auto& focus = viewModel.selection().focus();
         SkRect caretRect = focus.caret_rect();
         if (caretRect.isEmpty() || caretRect.height() <= 0) {
