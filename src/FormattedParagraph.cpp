@@ -6,10 +6,10 @@
  */
 
 #include "tools/text_editor/include/FormattedParagraph.h"
-#include "include/core/SkFontTypes.h"
-#include "src/core/SkUTF.h"
 #include <algorithm>
 #include <cmath>
+#include "include/core/SkFontTypes.h"
+#include "src/core/SkUTF.h"
 
 namespace skia::text_editor {
 
@@ -17,13 +17,9 @@ namespace {
 
 class FormattedParagraphImpl : public FormattedParagraph {
 public:
-    FormattedParagraphImpl(
-        std::shared_ptr<const ShapedParagraph> shaped_para,
-        const LayoutConstraints& constraints)
-        : fShaped(std::move(shaped_para))
-        , fWidth(0)
-        , fHeight(0)
-    {
+    FormattedParagraphImpl(std::shared_ptr<const ShapedParagraph> shaped_para,
+                           const LayoutConstraints& constraints)
+            : fShaped(std::move(shaped_para)), fWidth(0), fHeight(0) {
         layout(constraints);
     }
 
@@ -45,10 +41,10 @@ public:
                     continue;
                 }
                 RenderRun run{
-                    vr.font,
-                    vr.color,
-                    SkSpan<const SkGlyphID>(vr.glyph_ids),
-                    SkSpan<const SkPoint>(vr.glyph_positions),
+                        vr.font,
+                        vr.color,
+                        SkSpan<const SkGlyphID>(vr.glyph_ids),
+                        SkSpan<const SkPoint>(vr.glyph_positions),
                 };
                 visitor(run);
             }
@@ -130,6 +126,41 @@ private:
                 currentLine.text_range = TextRange(TextIndex(minStart), TextIndex(maxEnd));
             }
 
+            // BiDi Visual Reordering (UAX #9 Rule L2)
+            if (currentLine.visual_runs.size() > 1) {
+                const size_t numRuns = currentLine.visual_runs.size();
+                constexpr size_t kStackRuns = 16;
+                uint8_t stackLevels[kStackRuns];
+                int32_t stackVisualToLogical[kStackRuns];
+                std::unique_ptr<uint8_t[]> heapLevels;
+                std::unique_ptr<int32_t[]> heapVisualToLogical;
+
+                uint8_t* pLevels = stackLevels;
+                int32_t* pVisualToLogical = stackVisualToLogical;
+                if (numRuns > kStackRuns) {
+                    heapLevels = std::make_unique<uint8_t[]>(numRuns);
+                    heapVisualToLogical = std::make_unique<int32_t[]>(numRuns);
+                    pLevels = heapLevels.get();
+                    pVisualToLogical = heapVisualToLogical.get();
+                }
+
+                for (size_t i = 0; i < numRuns; ++i) {
+                    pLevels[i] = currentLine.visual_runs[i].bidi_level;
+                }
+                fShaped->unicode().reorderVisual(SkSpan<const uint8_t>(pLevels, numRuns),
+                                                 SkSpan<int32_t>(pVisualToLogical, numRuns));
+
+                std::vector<VisualRun> reorderedRuns;
+                reorderedRuns.reserve(numRuns);
+                for (size_t i = 0; i < numRuns; ++i) {
+                    int32_t logicalIdx = pVisualToLogical[i];
+                    if (logicalIdx >= 0 && static_cast<size_t>(logicalIdx) < numRuns) {
+                        reorderedRuns.push_back(std::move(currentLine.visual_runs[logicalIdx]));
+                    }
+                }
+                currentLine.visual_runs = std::move(reorderedRuns);
+            }
+
             // Apply horizontal text alignment (bake offset into visual runs)
             SkScalar xShift = 0;
             SkScalar availableWidth = constraints.max_width;
@@ -174,8 +205,10 @@ private:
             }
 
             currentLine.baseline = yCursor + std::abs(lineAscent) + maxZalgoTop;
-            SkScalar lineHeight = (std::abs(lineAscent) + maxZalgoTop) + (std::abs(lineDescent) + maxZalgoBottom);
-            currentLine.bounds = SkRect::MakeXYWH(xShift, yCursor, currentLine.content_width, lineHeight);
+            SkScalar lineHeight =
+                    (std::abs(lineAscent) + maxZalgoTop) + (std::abs(lineDescent) + maxZalgoBottom);
+            currentLine.bounds =
+                    SkRect::MakeXYWH(xShift, yCursor, currentLine.content_width, lineHeight);
             currentLine.ascent = lineAscent - maxZalgoTop;
             currentLine.descent = lineDescent + maxZalgoBottom;
             currentLine.typographic_ascent = lineAscent;
@@ -190,7 +223,8 @@ private:
                 for (const auto& g : vr.glyphs) {
                     if (!g.is_zero_width_control) {
                         vr.glyph_ids.push_back(static_cast<SkGlyphID>(g.glyph_id));
-                        vr.glyph_positions.push_back(SkPoint::Make(curGlyphX + g.offset.fX, currentLine.baseline + g.offset.fY));
+                        vr.glyph_positions.push_back(SkPoint::Make(
+                                curGlyphX + g.offset.fX, currentLine.baseline + g.offset.fY));
                     }
                     curGlyphX += g.advance.fX;
                 }
@@ -219,7 +253,8 @@ private:
             }
         }
         std::sort(breakOffsets.begin(), breakOffsets.end());
-        breakOffsets.erase(std::unique(breakOffsets.begin(), breakOffsets.end()), breakOffsets.end());
+        breakOffsets.erase(std::unique(breakOffsets.begin(), breakOffsets.end()),
+                           breakOffsets.end());
 
         VisualRun vr;
         bool vrInitialized = false;
@@ -241,16 +276,20 @@ private:
             if (!constraints.ellipsis.empty()) {
                 ShapedGlyph eg;
                 SkUnichar uEllipsis = 0x2026;
-                sr.item->font.textToGlyphs(&uEllipsis, sizeof(SkUnichar), SkTextEncoding::kUTF32,
+                sr.item->font.textToGlyphs(&uEllipsis,
+                                           sizeof(SkUnichar),
+                                           SkTextEncoding::kUTF32,
                                            {reinterpret_cast<SkGlyphID*>(&eg.glyph_id), 1});
                 SkScalar eWidth = 0;
-                sr.item->font.getWidths({reinterpret_cast<SkGlyphID*>(&eg.glyph_id), 1}, {&eWidth, 1});
+                sr.item->font.getWidths({reinterpret_cast<SkGlyphID*>(&eg.glyph_id), 1},
+                                        {&eWidth, 1});
                 if (eWidth <= 0) {
                     eWidth = sr.item->font.getSize() > 0 ? sr.item->font.getSize() * 0.6f : 8.0f;
                 }
                 eg.advance = SkPoint::Make(eWidth, 0);
                 eg.offset = SkPoint::Make(0, 0);
-                eg.cluster_text_index = vr.glyphs.empty() ? TextIndex(0) : vr.glyphs.back().cluster_text_index;
+                eg.cluster_text_index =
+                        vr.glyphs.empty() ? TextIndex(0) : vr.glyphs.back().cluster_text_index;
                 eg.is_mark = false;
                 eg.is_zero_width_control = false;
                 vr.glyphs.push_back(eg);
@@ -275,7 +314,8 @@ private:
                 continue;
             }
 
-            if (!vrInitialized || vr.font.getTypeface() != sr.item->font.getTypeface() || vr.bidi_level != sr.item->bidi_level) {
+            if (!vrInitialized || vr.font.getTypeface() != sr.item->font.getTypeface() ||
+                vr.bidi_level != sr.item->bidi_level) {
                 startNewVR(sr);
             }
 
@@ -290,9 +330,12 @@ private:
             for (size_t gIdx = 0; gIdx < sr.glyphs.size(); ++gIdx) {
                 const auto& g = sr.glyphs[gIdx];
                 bool isHard = fShaped->unicode().isHardLineBreak(g.cluster_text_index) ||
-                              (g.cluster_text_index.value < fullText.size() && fullText[g.cluster_text_index.value] == '\n');
-                bool isSoftBreak = (gIdx > curStart) &&
-                                   std::binary_search(breakOffsets.begin(), breakOffsets.end(), g.cluster_text_index.value);
+                              (g.cluster_text_index.value < fullText.size() &&
+                               fullText[g.cluster_text_index.value] == '\n');
+                bool isSoftBreak =
+                        (gIdx > curStart) && std::binary_search(breakOffsets.begin(),
+                                                                breakOffsets.end(),
+                                                                g.cluster_text_index.value);
 
                 if (isSoftBreak) {
                     chunks.push_back({curStart, gIdx, curW, false});
@@ -315,7 +358,8 @@ private:
 
             // Place chunks onto lines
             for (const auto& chunk : chunks) {
-                bool chunkFits = !std::isfinite(constraints.max_width) || (lineWidth + chunk.width <= constraints.max_width);
+                bool chunkFits = !std::isfinite(constraints.max_width) ||
+                                 (lineWidth + chunk.width <= constraints.max_width);
 
                 if (!chunkFits && lineWidth > 0) {
                     // Current line cannot fit this chunk; try wrapping to next line
@@ -341,7 +385,8 @@ private:
                 }
 
                 // Check if chunk fits on the current line (which could be freshly started)
-                if (!std::isfinite(constraints.max_width) || (lineWidth + chunk.width <= constraints.max_width)) {
+                if (!std::isfinite(constraints.max_width) ||
+                    (lineWidth + chunk.width <= constraints.max_width)) {
                     for (size_t gi = chunk.start_gidx; gi < chunk.end_gidx; ++gi) {
                         vr.glyphs.push_back(sr.glyphs[gi]);
                     }
@@ -361,13 +406,39 @@ private:
                         lineDescent = sr.descent;
                     }
                 } else {
-                    // Oversized chunk on empty/near-empty line: break inside chunk glyph-by-glyph
-                    for (size_t gi = chunk.start_gidx; gi < chunk.end_gidx; ++gi) {
-                        const auto& g = sr.glyphs[gi];
-                        SkScalar gWidth = g.advance.fX;
+                    // Oversized chunk on empty/near-empty line: break inside chunk
+                    // cluster-by-cluster (Invariant 3 & 7)
+                    auto graphemeBreaks = fShaped->unicode().grapheme_breaks();
+                    size_t gi = chunk.start_gidx;
+                    while (gi < chunk.end_gidx) {
+                        size_t clusterEnd = gi + 1;
+                        SkScalar clusterWidth = sr.glyphs[gi].advance.fX;
+                        TextIndex clusterStartIdx = sr.glyphs[gi].cluster_text_index;
 
-                        if (std::isfinite(constraints.max_width) && (lineWidth + gWidth > constraints.max_width) && lineWidth > 0) {
-                            if (constraints.max_lines > 0 && fLines.size() + 1 >= constraints.max_lines) {
+                        while (clusterEnd < chunk.end_gidx) {
+                            const auto& nextG = sr.glyphs[clusterEnd];
+                            bool isClusterContinuation =
+                                    nextG.is_mark || nextG.cluster_text_index == clusterStartIdx;
+                            if (!isClusterContinuation && !graphemeBreaks.empty()) {
+                                auto it = std::upper_bound(graphemeBreaks.begin(),
+                                                           graphemeBreaks.end(),
+                                                           clusterStartIdx);
+                                if (it != graphemeBreaks.end() && nextG.cluster_text_index < *it) {
+                                    isClusterContinuation = true;
+                                }
+                            }
+                            if (isClusterContinuation) {
+                                clusterWidth += nextG.advance.fX;
+                                clusterEnd++;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        if (std::isfinite(constraints.max_width) &&
+                            (lineWidth + clusterWidth > constraints.max_width) && lineWidth > 0) {
+                            if (constraints.max_lines > 0 &&
+                                fLines.size() + 1 >= constraints.max_lines) {
                                 appendEllipsis(sr);
                                 if (!vr.glyphs.empty()) {
                                     currentLine.visual_runs.push_back(std::move(vr));
@@ -386,13 +457,18 @@ private:
                             lineDescent = sr.descent;
                         }
 
-                        vr.glyphs.push_back(g);
-                        vr.width += gWidth;
-                        lineWidth += gWidth;
-                        currentLine.content_width += gWidth;
+                        for (size_t k = gi; k < clusterEnd; ++k) {
+                            vr.glyphs.push_back(sr.glyphs[k]);
+                        }
+                        vr.width += clusterWidth;
+                        lineWidth += clusterWidth;
+                        currentLine.content_width += clusterWidth;
 
-                        bool isHard = fShaped->unicode().isHardLineBreak(g.cluster_text_index) ||
-                                      (g.cluster_text_index.value < fullText.size() && fullText[g.cluster_text_index.value] == '\n');
+                        const auto& lastG = sr.glyphs[clusterEnd - 1];
+                        bool isHard =
+                                fShaped->unicode().isHardLineBreak(lastG.cluster_text_index) ||
+                                (lastG.cluster_text_index.value < fullText.size() &&
+                                 fullText[lastG.cluster_text_index.value] == '\n');
                         if (isHard) {
                             currentLine.has_hard_break = true;
                             if (!vr.glyphs.empty()) {
@@ -404,6 +480,8 @@ private:
                             lineAscent = sr.ascent;
                             lineDescent = sr.descent;
                         }
+
+                        gi = clusterEnd;
                     }
                 }
             }
@@ -427,13 +505,11 @@ private:
     SkScalar fHeight;
 };
 
-} // namespace
+}  // namespace
 
 std::unique_ptr<const FormattedParagraph> FormattedParagraph::Make(
-    std::shared_ptr<const ShapedParagraph> shaped_para,
-    const LayoutConstraints& constraints)
-{
+        std::shared_ptr<const ShapedParagraph> shaped_para, const LayoutConstraints& constraints) {
     return std::make_unique<FormattedParagraphImpl>(std::move(shaped_para), constraints);
 }
 
-} // namespace skia::text_editor
+}  // namespace skia::text_editor

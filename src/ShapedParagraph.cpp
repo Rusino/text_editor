@@ -6,14 +6,16 @@
  */
 
 #include "tools/text_editor/include/ShapedParagraph.h"
+#include <hb-ot.h>
+#include <hb.h>
+#include <mutex>
+#include <unordered_map>
 #include "include/core/SkData.h"
 #include "include/core/SkFontMetrics.h"
 #include "include/core/SkFontTypes.h"
 #include "include/core/SkStream.h"
 #include "include/core/SkTypeface.h"
 #include "src/core/SkUTF.h"
-#include <hb.h>
-#include <hb-ot.h>
 #include "tools/fonts/FontToolUtils.h"
 
 namespace skia::text_editor {
@@ -28,18 +30,44 @@ static hb_blob_t* skhb_get_table(hb_face_t* face, hb_tag_t tag, void* user_data)
         return nullptr;
     }
     SkData* rawData = data.release();
-    return hb_blob_create(reinterpret_cast<char*>(rawData->writable_data()), rawData->size(),
-                          HB_MEMORY_MODE_READONLY, rawData, [](void* ctx) {
-                              SkSafeUnref(reinterpret_cast<SkData*>(ctx));
-                          });
+    return hb_blob_create(reinterpret_cast<char*>(rawData->writable_data()),
+                          rawData->size(),
+                          HB_MEMORY_MODE_READONLY,
+                          rawData,
+                          [](void* ctx) { SkSafeUnref(reinterpret_cast<SkData*>(ctx)); });
+}
+
+static hb_face_t* get_or_create_hb_face(SkTypeface* typeface) {
+    if (!typeface) {
+        return nullptr;
+    }
+    static std::mutex sMutex;
+    static std::unordered_map<SkTypefaceID, hb_face_t*> sFaceCache;
+
+    std::lock_guard<std::mutex> lock(sMutex);
+    auto it = sFaceCache.find(typeface->uniqueID());
+    if (it != sFaceCache.end()) {
+        return hb_face_reference(it->second);
+    }
+
+    hb_face_t* face = hb_face_create_for_tables(skhb_get_table, SkRef(typeface), [](void* ctx) {
+        SkSafeUnref(reinterpret_cast<SkTypeface*>(ctx));
+    });
+    if (face) {
+        int upem = typeface->getUnitsPerEm();
+        if (upem > 0) {
+            hb_face_set_upem(face, static_cast<unsigned int>(upem));
+        }
+        hb_face_make_immutable(face);
+        sFaceCache[typeface->uniqueID()] = hb_face_reference(face);
+    }
+    return face;
 }
 
 class ShapedParagraphImpl : public ShapedParagraph {
 public:
     ShapedParagraphImpl(std::shared_ptr<const UnicodeParagraph> unicode_para)
-        : fUnicode(std::move(unicode_para))
-        , fAdvanceWidth(0)
-    {
+            : fUnicode(std::move(unicode_para)), fAdvanceWidth(0) {
         shapeRuns();
     }
 
@@ -80,49 +108,39 @@ private:
 
             const char* runText = fullText.data() + runStart;
 
-            // 1. Initialize HarfBuzz buffer with strictly preserved 1-to-1 character cluster mapping
+            // 1. Initialize HarfBuzz buffer with strictly preserved 1-to-1 character
+            // cluster mapping
             hb_buffer_t* buf = hb_buffer_create();
             hb_buffer_set_cluster_level(buf, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
 
             static hb_unicode_funcs_t* sNoComposeFuncs = []() {
-                hb_unicode_funcs_t* ufuncs = hb_unicode_funcs_create(hb_unicode_funcs_get_default());
-                hb_unicode_funcs_set_compose_func(ufuncs,
-                    [](hb_unicode_funcs_t*, hb_codepoint_t, hb_codepoint_t, hb_codepoint_t*, void*) -> hb_bool_t {
-                        return false;
-                    }, nullptr, nullptr);
+                hb_unicode_funcs_t* ufuncs =
+                        hb_unicode_funcs_create(hb_unicode_funcs_get_default());
+                hb_unicode_funcs_set_compose_func(
+                        ufuncs,
+                        [](hb_unicode_funcs_t*,
+                           hb_codepoint_t,
+                           hb_codepoint_t,
+                           hb_codepoint_t*,
+                           void*) -> hb_bool_t { return false; },
+                        nullptr,
+                        nullptr);
                 hb_unicode_funcs_make_immutable(ufuncs);
                 return ufuncs;
             }();
             hb_buffer_set_unicode_funcs(buf, sNoComposeFuncs);
 
             hb_buffer_add_utf8(buf, fullText.data(), fullText.size(), runStart, runLen);
-            hb_buffer_set_direction(buf, item.direction == Direction::kRTL ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
+            hb_buffer_set_direction(
+                    buf, item.direction == Direction::kRTL ? HB_DIRECTION_RTL : HB_DIRECTION_LTR);
             hb_buffer_guess_segment_properties(buf);
 
-            // 2. Load HarfBuzz font face from SkTypeface
+            // 2. Load HarfBuzz font face from SkTypeface (cached, table-based)
             sk_sp<SkTypeface> typeface = item.font.refTypeface();
             if (!typeface) {
                 typeface = ToolUtils::DefaultTypeface();
             }
-            hb_face_t* hbFace = nullptr;
-            if (typeface) {
-                int ttcIndex = 0;
-                std::unique_ptr<SkStreamAsset> stream = typeface->openStream(&ttcIndex);
-                if (stream) {
-                    size_t streamLen = stream->getLength();
-                    sk_sp<SkData> data = SkData::MakeUninitialized(streamLen);
-                    if (stream->read(data->writable_data(), streamLen) == streamLen) {
-                        hb_blob_t* blob = hb_blob_create((const char*)data->data(), data->size(),
-                                                         HB_MEMORY_MODE_DUPLICATE, nullptr, nullptr);
-                        hbFace = hb_face_create(blob, ttcIndex);
-                        hb_blob_destroy(blob);
-                    }
-                }
-                if (!hbFace) {
-                    hbFace = hb_face_create_for_tables(skhb_get_table, typeface.get(), nullptr);
-                    hb_face_set_index(hbFace, (unsigned)ttcIndex);
-                }
-            }
+            hb_face_t* hbFace = get_or_create_hb_face(typeface.get());
 
             hb_font_t* hbFont = hbFace ? hb_font_create(hbFace) : nullptr;
             if (hbFont) {
@@ -138,10 +156,10 @@ private:
 
             // 3. Negative Constraints: Disable liga and ccmp to guarantee 1-to-1 mapping
             hb_feature_t features[] = {
-                { HB_TAG('l', 'i', 'g', 'a'), 0, 0, (unsigned int)-1 },
-                { HB_TAG('c', 'c', 'm', 'p'), 0, 0, (unsigned int)-1 },
-                { HB_TAG('d', 'l', 'i', 'g'), 0, 0, (unsigned int)-1 },
-                { HB_TAG('c', 'a', 'l', 't'), 0, 0, (unsigned int)-1 },
+                    {HB_TAG('l', 'i', 'g', 'a'), 0, 0, (unsigned int)-1},
+                    {HB_TAG('c', 'c', 'm', 'p'), 0, 0, (unsigned int)-1},
+                    {HB_TAG('d', 'l', 'i', 'g'), 0, 0, (unsigned int)-1},
+                    {HB_TAG('c', 'a', 'l', 't'), 0, 0, (unsigned int)-1},
             };
 
             if (hbFont) {
@@ -161,7 +179,8 @@ private:
                     TextIndex codepointOffset(ptr - fullText.data());
                     SkUnichar u = SkUTF::NextUTF8(&ptr, end);
                     SkGlyphID gid = 0;
-                    item.font.textToGlyphs(&u, sizeof(SkUnichar), SkTextEncoding::kUTF32, {&gid, 1});
+                    item.font.textToGlyphs(
+                            &u, sizeof(SkUnichar), SkTextEncoding::kUTF32, {&gid, 1});
                     SkScalar width = 0;
                     item.font.getWidths({&gid, 1}, {&width, 1});
 
@@ -210,7 +229,7 @@ private:
                     }
                     sg.advance = SkPoint::Make(w, glyphPositions[i].y_advance / 64.0f);
                     sg.offset = SkPoint::Make(glyphPositions[i].x_offset / 64.0f,
-                                             glyphPositions[i].y_offset / 64.0f);
+                                              glyphPositions[i].y_offset / 64.0f);
 
                     shaped.width += sg.advance.fX;
                     shaped.glyphs.push_back(sg);
@@ -235,12 +254,11 @@ private:
     SkScalar fAdvanceWidth;
 };
 
-} // namespace
+}  // namespace
 
 std::unique_ptr<const ShapedParagraph> ShapedParagraph::Make(
-    std::shared_ptr<const UnicodeParagraph> unicode_para)
-{
+        std::shared_ptr<const UnicodeParagraph> unicode_para) {
     return std::make_unique<ShapedParagraphImpl>(std::move(unicode_para));
 }
 
-} // namespace skia::text_editor
+}  // namespace skia::text_editor

@@ -26,8 +26,7 @@ namespace skia::text_editor {
 
 // --- Strong Type Index Wrappers (Zero Overhead, Zero Implicit Mixing) ---
 
-template <typename Tag>
-struct StrongIndex {
+template <typename Tag> struct StrongIndex {
     size_t value{0};
 
     constexpr StrongIndex() = default;
@@ -45,22 +44,35 @@ struct StrongIndex {
     constexpr StrongIndex operator-(size_t offset) const { return StrongIndex(value - offset); }
     constexpr size_t operator-(const StrongIndex& other) const { return value - other.value; }
 
-    constexpr StrongIndex& operator++() { ++value; return *this; }
-    constexpr StrongIndex operator++(int) { StrongIndex tmp = *this; ++value; return tmp; }
-    constexpr StrongIndex& operator--() { --value; return *this; }
-    constexpr StrongIndex operator--(int) { StrongIndex tmp = *this; --value; return tmp; }
+    constexpr StrongIndex& operator++() {
+        ++value;
+        return *this;
+    }
+    constexpr StrongIndex operator++(int) {
+        StrongIndex tmp = *this;
+        ++value;
+        return tmp;
+    }
+    constexpr StrongIndex& operator--() {
+        --value;
+        return *this;
+    }
+    constexpr StrongIndex operator--(int) {
+        StrongIndex tmp = *this;
+        --value;
+        return tmp;
+    }
 };
 
 struct TextIndexTag {};
 struct GlyphIndexTag {};
 struct ClusterIndexTag {};
 
-using TextIndex = StrongIndex<TextIndexTag>;       // UTF-8 byte offset
-using GlyphIndex = StrongIndex<GlyphIndexTag>;     // Index in shaped glyph array
-using ClusterIndex = StrongIndex<ClusterIndexTag>; // Grapheme / shaping cluster index
+using TextIndex = StrongIndex<TextIndexTag>;        // UTF-8 byte offset
+using GlyphIndex = StrongIndex<GlyphIndexTag>;      // Index in shaped glyph array
+using ClusterIndex = StrongIndex<ClusterIndexTag>;  // Grapheme / shaping cluster index
 
-template <typename IndexType>
-struct StrongRange {
+template <typename IndexType> struct StrongRange {
     IndexType start{0};
     IndexType end{0};
 
@@ -71,9 +83,7 @@ struct StrongRange {
     constexpr bool operator==(const StrongRange& other) const {
         return start == other.start && end == other.end;
     }
-    constexpr bool operator!=(const StrongRange& other) const {
-        return !(*this == other);
-    }
+    constexpr bool operator!=(const StrongRange& other) const { return !(*this == other); }
     constexpr bool empty() const { return start >= end; }
     constexpr size_t length() const { return end > start ? (size_t)(end - start) : 0; }
     constexpr bool contains(IndexType index) const { return index >= start && index < end; }
@@ -107,8 +117,8 @@ enum class CursorDirection : uint8_t {
 };
 
 enum class NavigationMode : uint8_t {
-    kScreenPhysical, // Moves physically on screen (e.g. Right = physical right, Left = physical left)
-    kTextLogical,    // Moves along buffer memory order (+1 = next codepoint/reading direction)
+    kScreenPhysical,  // Moves physically on screen (Right = right, Left = left)
+    kTextLogical,     // Moves along buffer memory order (+1 = next codepoint/reading direction)
 };
 
 enum class MovementGranularity : uint8_t {
@@ -119,8 +129,8 @@ enum class MovementGranularity : uint8_t {
 };
 
 enum class Affinity : uint8_t {
-    kUpstream,   // Associated with the preceding character
-    kDownstream, // Associated with the following character
+    kUpstream,    // Associated with the preceding character
+    kDownstream,  // Associated with the following character
 };
 
 struct StyleSpan {
@@ -132,21 +142,20 @@ struct StyleSpan {
 class CaretPosition {
 public:
     CaretPosition() = default;
-    CaretPosition(TextIndex idx, Affinity aff = Affinity::kDownstream, SkRect rect = SkRect::MakeEmpty())
-        : fTextIndex(idx), fAffinity(aff), fCaretRect(rect) {}
+    CaretPosition(TextIndex idx,
+                  Affinity aff = Affinity::kDownstream,
+                  SkRect rect = SkRect::MakeEmpty())
+            : fTextIndex(idx), fAffinity(aff), fCaretRect(rect) {}
 
     TextIndex text_index() const { return fTextIndex; }
     Affinity affinity() const { return fAffinity; }
     const SkRect& caret_rect() const { return fCaretRect; }
 
     bool operator==(const CaretPosition& other) const {
-        return fTextIndex == other.fTextIndex &&
-               fAffinity == other.fAffinity &&
+        return fTextIndex == other.fTextIndex && fAffinity == other.fAffinity &&
                fCaretRect == other.fCaretRect;
     }
-    bool operator!=(const CaretPosition& other) const {
-        return !(*this == other);
-    }
+    bool operator!=(const CaretPosition& other) const { return !(*this == other); }
 
 private:
     TextIndex fTextIndex{0};
@@ -155,14 +164,14 @@ private:
 };
 
 static_assert(!std::is_aggregate_v<CaretPosition>,
-    "Domain entity must be strictly encapsulated; raw fields are prohibited");
+              "Domain entity must be strictly encapsulated; raw fields are prohibited");
 
 class EditorSelection {
 public:
     EditorSelection() = default;
     EditorSelection(CaretPosition a, CaretPosition f) : fAnchor(a), fFocus(f) {}
     EditorSelection(CaretPosition a, CaretPosition f, std::vector<TextRange> r)
-        : fAnchor(a), fFocus(f), fRanges(std::move(r)) {}
+            : fAnchor(a), fFocus(f), fRanges(std::move(r)) {}
 
     // Read-only accessors enforcing const-correctness (Invariant 20)
     const CaretPosition& anchor() const { return fAnchor; }
@@ -173,7 +182,7 @@ public:
         if (!fRanges.empty()) {
             return false;
         }
-        return fAnchor.text_index() == fFocus.text_index() && fAnchor.affinity() == fFocus.affinity();
+        return fAnchor.text_index() == fFocus.text_index();
     }
 
     TextRange text_range() const {
@@ -212,9 +221,7 @@ public:
     bool operator==(const EditorSelection& other) const {
         return fAnchor == other.fAnchor && fFocus == other.fFocus && fRanges == other.fRanges;
     }
-    bool operator!=(const EditorSelection& other) const {
-        return !(*this == other);
-    }
+    bool operator!=(const EditorSelection& other) const { return !(*this == other); }
 
 private:
     CaretPosition fAnchor;
@@ -226,8 +233,8 @@ private:
 // Compile-time aggregate rejection.
 // Ensures EditorSelection cannot be used as an anemic aggregate struct with exposed raw fields.
 static_assert(!std::is_aggregate_v<EditorSelection>,
-    "EditorSelection must not be an aggregate struct; fields must be private.");
+              "EditorSelection must not be an aggregate struct; fields must be private.");
 
-} // namespace skia::text_editor
+}  // namespace skia::text_editor
 
-#endif // EditorTypes_DEFINED
+#endif  // EditorTypes_DEFINED

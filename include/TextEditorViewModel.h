@@ -30,7 +30,8 @@ namespace skia::text_editor {
 
 /**
  * TextEditorViewModel (ViewModel in MVVM):
- * Concrete presentation coordinator owning session state (selection, caret blinking, viewport scroll offset),
+ * Concrete presentation coordinator owning session state (selection, caret blinking, viewport
+ * scroll offset),
  * translating user intents/commands into Model mutations, and preparing pre-transformed
  * geometry for the View.
  *
@@ -72,9 +73,15 @@ public:
     // Presentation State Queries (Fully Inlined)
     const EditorSelection& selection() const { return fSelection; }
     SkPoint scrollOffset() const { return fScrollOffset; }
-    void setScrollOffset(SkPoint offset) { fScrollOffset = offset; notifyRedraw(); }
+    void setScrollOffset(SkPoint offset) {
+        fScrollOffset = offset;
+        notifyRedraw();
+    }
     bool isCaretVisible() const { return fCaretVisible; }
-    void setCaretVisible(bool visible) { fCaretVisible = visible; notifyRedraw(); }
+    void setCaretVisible(bool visible) {
+        fCaretVisible = visible;
+        notifyRedraw();
+    }
     NavigationMode navigationMode() const { return fNavMode; }
     void setNavigationMode(NavigationMode mode) { fNavMode = mode; }
 
@@ -86,6 +93,18 @@ public:
     void moveCaretToPoint(SkScalar screenX, SkScalar screenY, bool select);
     void selectAll();
     void selectWordAtPoint(SkScalar screenX, SkScalar screenY);
+    void selectLineAtPoint(SkScalar screenX, SkScalar screenY);
+    void handleMouseDown(SkScalar screenX,
+                         SkScalar screenY,
+                         skui::ModifierKey modifiers = skui::ModifierKey::kNone);
+    void handleMouseMove(SkScalar screenX, SkScalar screenY);
+    void handleMouseUp(SkScalar screenX, SkScalar screenY);
+
+    // Search and Replace (Zero-Allocation Hot-Path Model)
+    bool findNext(std::string_view query, bool matchCase = false);
+    bool findPrevious(std::string_view query, bool matchCase = false);
+    bool replaceCurrent(std::string_view replacement);
+    size_t replaceAll(std::string_view query, std::string_view replacement, bool matchCase = false);
     void setSelection(CaretPosition anchor, CaretPosition focus);
     void collapseTo(CaretPosition pos);
 
@@ -121,13 +140,7 @@ public:
 
 private:
     struct EditCommand {
-        enum class Kind {
-            kTyping,
-            kPaste,
-            kDelete,
-            kCutOrBlock,
-            kNewline
-        };
+        enum class Kind { kTyping, kPaste, kDelete, kCutOrBlock, kNewline };
         Kind kind;
         TextIndex position;
         std::string textBefore;
@@ -151,10 +164,25 @@ private:
     SkPoint fDragAnchorDocPoint{0, 0};
     bool fHasDragPoint{false};
     bool fCaretVisible{true};
+    SkScalar fPreferredX{0.0f};
+    bool fHasPreferredX{false};
     NavigationMode fNavMode{NavigationMode::kTextLogical};
     RedrawCallback fOnRedraw;
     ClipboardSetter fClipboardSetter;
     ClipboardGetter fClipboardGetter;
+
+    enum class DragMode : uint8_t {
+        kGrapheme,
+        kWord,
+        kLine,
+    };
+    DragMode fDragMode{DragMode::kGrapheme};
+    int fClickCount{0};
+    std::chrono::steady_clock::time_point fLastClickTime{};
+    SkPoint fLastClickScreenPos{0, 0};
+    TextRange fInitialWordRange{0, 0};
+    TextRange fInitialLineRange{0, 0};
+    bool fIsMouseDown{false};
 
     static constexpr size_t kMaxUndoDepth = 1000;
     std::deque<EditCommand> fUndoStack;
@@ -164,8 +192,8 @@ private:
 };
 
 static_assert(!std::is_aggregate_v<TextEditorViewModel>,
-    "Domain entity must be strictly encapsulated; raw fields are prohibited");
+              "Domain entity must be strictly encapsulated; raw fields are prohibited");
 
-} // namespace skia::text_editor
+}  // namespace skia::text_editor
 
-#endif // TextEditorViewModel_DEFINED
+#endif  // TextEditorViewModel_DEFINED

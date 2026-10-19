@@ -24,10 +24,7 @@ using namespace skia::text_editor;
 class TextEditorApp : public Application, public Window::Layer {
 public:
     TextEditorApp(int argc, char** argv, void* platformData)
-        : fBackendType(Window::BackendType::kRaster)
-        , fIsMouseDown(false)
-        , fPadding(24.0f)
-    {
+            : fBackendType(Window::BackendType::kRaster), fIsMouseDown(false), fPadding(24.0f) {
         SkGraphics::Init();
 
         fWindow = Windows::CreateNativeWindow(platformData);
@@ -50,40 +47,36 @@ public:
         font.setSize(18.0f);
 
         std::string initialText =
-            "Welcome to the Skia Text Editor!\n"
-            "This is a clean, immutable 4-layer text layout and editing engine.\n"
-            "Features:\n"
-            "- Exact 1-to-1 HarfBuzz cluster mapping (liga=0, ccmp=0)\n"
-            "- UAX #9 BiDi reordering & Arabic support: مرحبا بالعالم\n"
-            "- Dynamic vertical Zalgo bounding boxes: e\xcc\x81\xcc\x80\xcc\x83\xcc\x82\xcc\x88\xcc\x8a\n"
-            "- Zero-heap spatial navigation & selection\n\n"
-            "Try clicking, typing, backspace, and arrow keys!";
+                "Welcome to the Skia Text Editor!\n"
+                "This is a clean, immutable 4-layer text layout and editing engine.\n"
+                "Features:\n"
+                "- Exact 1-to-1 HarfBuzz cluster mapping (liga=0, ccmp=0)\n"
+                "- UAX #9 BiDi reordering & Arabic support: مرحبا بالعالم\n"
+                "- Dynamic vertical Zalgo bounding boxes: "
+                "e\xcc\x81\xcc\x80\xcc\x83\xcc\x82\xcc\x88\xcc\x8a\n"
+                "- Zero-heap spatial navigation & selection\n\n"
+                "Try clicking, typing, backspace, and arrow keys!";
 
         LayoutConstraints constraints;
         constraints.max_width = 760.0f;
 
         fViewModel = std::make_unique<TextEditorViewModel>(
-            initialText,
-            font,
-            SkColor4f{0.1f, 0.1f, 0.12f, 1.0f},
-            constraints);
+                initialText, font, SkColor4f{0.1f, 0.1f, 0.12f, 1.0f}, constraints);
 
-        fViewModel->setOnRedrawCallback([this]() {
-            fWindow->inval();
-        });
+        fViewModel->setOnRedrawCallback([this]() { fWindow->inval(); });
 
         fViewModel->setClipboardHandlers(
-            [this](std::string_view text) {
-                fLocalClipboard = std::string(text);
-                fWindow->setClipboardText(fLocalClipboard.c_str());
-            },
-            [this]() -> std::string {
-                if (!fLocalClipboard.empty()) {
-                    return fLocalClipboard;
-                }
-                const char* clip = fWindow->getClipboardText();
-                return clip ? std::string(clip) : std::string();
-            });
+                [this](std::string_view text) {
+                    fLocalClipboard = std::string(text);
+                    fWindow->setClipboardText(fLocalClipboard.c_str());
+                },
+                [this]() -> std::string {
+                    if (!fLocalClipboard.empty()) {
+                        return fLocalClipboard;
+                    }
+                    const char* clip = fWindow->getClipboardText();
+                    return clip ? std::string(clip) : std::string();
+                });
     }
 
     ~TextEditorApp() override {
@@ -119,7 +112,7 @@ public:
         canvas->translate(fPadding, fPadding);
 
         PaintOptions options;
-        options.origin = SkPoint::Make(0, 0); // Text editor starts at (0, 0)
+        options.origin = SkPoint::Make(0, 0);  // Text editor starts at (0, 0)
         options.caret_width = 2.0f;
         options.caret_color = SkColor4f{0.15f, 0.45f, 0.95f, 1.0f};
         options.selection_color = SkColor4f{0.75f, 0.85f, 1.0f, 0.5f};
@@ -134,9 +127,15 @@ public:
             return false;
         }
         if (fLastHandledShortcut != skui::Key::kNONE) {
-            // Event absorption: this key was already consumed as a shortcut command by onKey
-            // in this same event slice from the platform window harness.
+            // Event absorption: this key was already consumed as a command by onKey
+            // in this same event slice from the platform window harness
             fLastHandledShortcut = skui::Key::kNONE;
+            return true;
+        }
+        // macOS Cocoa maps function keys and arrows to Private Use Area (0xF700 - 0xF8FF).
+        // Non-printable control characters (< 0x20 except \n, \t) and DEL (0x7F)
+        // must never be typed
+        if ((c >= 0xF700 && c <= 0xF8FF) || (c < 0x20 && c != '\n' && c != '\t') || c == 0x7F) {
             return true;
         }
         return fViewModel->handleChar(c, modifiers);
@@ -146,9 +145,8 @@ public:
         if (!fViewModel) {
             return false;
         }
-        bool ctrlOrCmd = ((modifiers & (skui::ModifierKey::kControl | skui::ModifierKey::kCommand)) != skui::ModifierKey::kNone);
         bool handled = fViewModel->handleKey(key, state, modifiers);
-        if (handled && state == skui::InputState::kDown && ctrlOrCmd) {
+        if (handled && state == skui::InputState::kDown) {
             fLastHandledShortcut = key;
         } else {
             fLastHandledShortcut = skui::Key::kNONE;
@@ -160,19 +158,19 @@ public:
         if (!fViewModel) {
             return false;
         }
-        bool shift = (modifiers & skui::ModifierKey::kShift) != skui::ModifierKey::kNone;
         SkScalar localX = static_cast<SkScalar>(x) - fPadding;
         SkScalar localY = static_cast<SkScalar>(y) - fPadding;
 
         if (state == skui::InputState::kDown) {
             fIsMouseDown = true;
-            fViewModel->moveCaretToPoint(localX, localY, shift);
+            fViewModel->handleMouseDown(localX, localY, modifiers);
             return true;
         } else if (state == skui::InputState::kMove && fIsMouseDown) {
-            fViewModel->moveCaretToPoint(localX, localY, true);
+            fViewModel->handleMouseMove(localX, localY);
             return true;
         } else if (state == skui::InputState::kUp) {
             fIsMouseDown = false;
+            fViewModel->handleMouseUp(localX, localY);
             return true;
         }
         return false;

@@ -6,24 +6,21 @@
  */
 
 #include "tools/text_editor/include/TextEditorPainter.h"
+#include <vector>
 #include "include/core/SkPaint.h"
 #include "include/core/SkPoint.h"
-#include <vector>
 
 namespace skia::text_editor {
 
-void TextEditorPainter::Paint(
-    SkCanvas* canvas,
-    const TextEditorViewModel& viewModel,
-    const PaintOptions& options)
-{
+void TextEditorPainter::Paint(SkCanvas* canvas,
+                              const TextEditorViewModel& viewModel,
+                              const PaintOptions& options) {
     if (!canvas) {
         return;
     }
 
     canvas->save();
-    canvas->translate(options.origin.fX - viewModel.scrollOffset().fX,
-                      options.origin.fY - viewModel.scrollOffset().fY);
+    canvas->translate(options.origin.fX, options.origin.fY);
 
     // 1. Draw Selection Rectangles (Pure Consumer of ViewModel Projection - Invariant 13)
     if (!viewModel.selection().is_collapsed()) {
@@ -31,16 +28,14 @@ void TextEditorPainter::Paint(
         selPaint.setColor4f(options.selection_color);
         selPaint.setStyle(SkPaint::kFill_Style);
 
-        // Note: canvas is already translated by (-scrollOffset), and screenSelectionRects()
-        // provides screen-space rects (which already include -scrollOffset).
-        // Since canvas has translate(-scrollOffset), we draw document-space rects or compensate:
-        for (SkRect r : viewModel.screenSelectionRects()) {
-            r.offset(viewModel.scrollOffset().fX, viewModel.scrollOffset().fY);
+        for (const SkRect& r : viewModel.screenSelectionRects()) {
             canvas->drawRect(r, selPaint);
         }
     }
 
     // 2. Draw Text Glyphs via Zero-Allocation Streaming Visitor
+    canvas->save();
+    canvas->translate(-viewModel.scrollOffset().fX, -viewModel.scrollOffset().fY);
     SkRect localClip = canvas->getLocalClipBounds();
     viewModel.document().visitDocumentRuns(localClip, [&](const RenderRun& run) {
         if (run.glyphs.empty()) {
@@ -50,30 +45,14 @@ void TextEditorPainter::Paint(
         textPaint.setColor4f(run.color);
         textPaint.setAntiAlias(true);
 
-        canvas->drawGlyphs(
-            run.glyphs,
-            run.positions,
-            SkPoint::Make(0, 0),
-            run.font,
-            textPaint);
+        canvas->drawGlyphs(run.glyphs, run.positions, SkPoint::Make(0, 0), run.font, textPaint);
     });
+    canvas->restore();
 
-    // 3. Draw Caret
+    // 3. Draw Caret (Pure Consumer of ViewModel Projection - Invariant 13)
     if (options.show_caret && viewModel.isCaretVisible() && viewModel.selection().is_collapsed()) {
-        const auto& focus = viewModel.selection().focus();
-        SkRect caretRect = focus.caret_rect();
-        if (caretRect.isEmpty() || caretRect.height() <= 0) {
-            const auto& lines = viewModel.document().formatted().lines();
-            if (!lines.empty()) {
-                const auto& firstLine = lines[0];
-                caretRect = SkRect::MakeXYWH(firstLine.bounds.fLeft, firstLine.baseline + firstLine.ascent,
-                                             options.caret_width, std::abs(firstLine.ascent) + std::abs(firstLine.descent));
-            } else {
-                caretRect = SkRect::MakeXYWH(0, 0, options.caret_width, 16.0f);
-            }
-        } else {
-            caretRect.fRight = caretRect.fLeft + options.caret_width;
-        }
+        SkRect caretRect = viewModel.screenCaretRect();
+        caretRect.fRight = caretRect.fLeft + options.caret_width;
 
         SkPaint caretPaint;
         caretPaint.setColor4f(options.caret_color);
@@ -84,4 +63,4 @@ void TextEditorPainter::Paint(
     canvas->restore();
 }
 
-} // namespace skia::text_editor
+}  // namespace skia::text_editor

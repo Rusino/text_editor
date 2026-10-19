@@ -10,32 +10,28 @@
 
 namespace skia::text_editor {
 
-TextDocument::TextDocument(
-    std::string initial_text,
-    SkFont default_font,
-    SkColor4f text_color,
-    LayoutConstraints constraints)
-    : fText(std::move(initial_text))
-    , fConstraints(std::move(constraints))
-    , fRevision(0)
-{
-    fStyles = {
-        { TextRange(TextIndex(0), TextIndex(fText.size())), std::move(default_font), text_color }
-    };
+TextDocument::TextDocument(std::string initial_text,
+                           SkFont default_font,
+                           SkColor4f text_color,
+                           LayoutConstraints constraints)
+        : fText(std::move(initial_text)), fConstraints(std::move(constraints)), fRevision(0) {
+    fStyles = {{TextRange(TextIndex(0), TextIndex(fText.size())),
+                std::move(default_font),
+                text_color}};
     rebuildPipeline();
 }
 
-TextDocument::TextDocument(
-    std::string initial_text,
-    std::vector<StyleSpan> styles,
-    LayoutConstraints constraints)
-    : fText(std::move(initial_text))
-    , fStyles(std::move(styles))
-    , fConstraints(std::move(constraints))
-    , fRevision(0)
-{
+TextDocument::TextDocument(std::string initial_text,
+                           std::vector<StyleSpan> styles,
+                           LayoutConstraints constraints)
+        : fText(std::move(initial_text))
+        , fStyles(std::move(styles))
+        , fConstraints(std::move(constraints))
+        , fRevision(0) {
     if (fStyles.empty()) {
-        fStyles.push_back({ TextRange(TextIndex(0), TextIndex(fText.size())), SkFont(), SkColor4f{0, 0, 0, 1} });
+        fStyles.push_back({TextRange(TextIndex(0), TextIndex(fText.size())),
+                           SkFont(),
+                           SkColor4f{0, 0, 0, 1}});
     }
     rebuildPipeline();
 }
@@ -85,7 +81,9 @@ void TextDocument::replace(TextRange range, std::string_view utf8_text) {
 void TextDocument::setStyles(std::vector<StyleSpan> styles) {
     fStyles = std::move(styles);
     if (fStyles.empty()) {
-        fStyles.push_back({ TextRange(TextIndex(0), TextIndex(fText.size())), SkFont(), SkColor4f{0, 0, 0, 1} });
+        fStyles.push_back({TextRange(TextIndex(0), TextIndex(fText.size())),
+                           SkFont(),
+                           SkColor4f{0, 0, 0, 1}});
     }
     ++fRevision;
     rebuildPipeline();
@@ -105,13 +103,32 @@ void TextDocument::rebuildPipeline() {
 }
 
 void TextDocument::shiftStylesOnInsert(size_t pos, size_t len) {
-    for (auto& span : fStyles) {
-        if (span.range.start.value >= pos) {
-            span.range.start = span.range.start + len;
+    if (fStyles.empty() || len == 0) {
+        return;
+    }
+
+    if (pos == 0 && fStyles[0].range.start.value == 0) {
+        fStyles[0].range.end = fStyles[0].range.end + len;
+        for (size_t i = 1; i < fStyles.size(); ++i) {
+            fStyles[i].range.start = fStyles[i].range.start + len;
+            fStyles[i].range.end = fStyles[i].range.end + len;
         }
-        if (span.range.end.value >= pos) {
+        return;
+    }
+
+    bool expanded = false;
+    for (auto& span : fStyles) {
+        if (!expanded && span.range.start.value < pos && span.range.end.value >= pos) {
+            span.range.end = span.range.end + len;
+            expanded = true;
+        } else if (span.range.start.value >= pos) {
+            span.range.start = span.range.start + len;
             span.range.end = span.range.end + len;
         }
+    }
+
+    if (!expanded && !fStyles.empty()) {
+        fStyles.back().range.end = fStyles.back().range.end + len;
     }
 }
 
@@ -135,4 +152,4 @@ void TextDocument::shiftStylesOnErase(size_t start, size_t len) {
     }
 }
 
-} // namespace skia::text_editor
+}  // namespace skia::text_editor
